@@ -1,0 +1,16 @@
+# EGS Print Service Dependencies
+# Standalone multi-brand printer management service
+
+# Web framework
+Flask>=2.0.0
+flask-cors>=3.0.10
+
+# Image processing (for label generation and conversion)
+Pillow>=9.0.0
+
+# Windows-specific (optional, for Evolis USB printing)
+# pywin32>=300  # Uncomment on Windows for Evolis USB support
+
+# Optional: For enhanced printer discovery
+# python-escpos>=3.0  # ESC/POS printer library
+# zpl>=1.0  # ZPL label library

@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EGS Print Service</title>
+    <style>
+        :root {
+            --color-primary: #2d3436;
+            --color-success: #00b894;
+            --color-warning: #fdcb6e;
+            --color-danger: #d63031;
+            --color-gray-100: #f8f9fa;
+            --color-gray-200: #e9ecef;
+            --color-gray-300: #dee2e6;
+            --color-gray-600: #6c757d;
+            --color-gray-800: #343a40;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--color-gray-100);
+            color: var(--color-gray-800);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: var(--color-primary);
+            color: white;
+            padding: 20px 0;
+            margin-bottom: 30px;
+        }
+
+        header h1 {
+            font-size: 24px;
+            font-weight: 600;
+        }
+
+        header .version {
+            font-size: 14px;
+            opacity: 0.8;
+        }
+
+        .status-bar {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .status-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            flex: 1;
+            min-width: 200px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .status-card h3 {
+            font-size: 14px;
+            color: var(--color-gray-600);
+            margin-bottom: 8px;
+        }
+
+        .status-card .value {
+            font-size: 32px;
+            font-weight: 600;
+        }
+
+        .status-online { color: var(--color-success); }
+        .status-offline { color: var(--color-danger); }
+        .status-sleeping { color: var(--color-warning); }
+
+        .section {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .section-header h2 {
+            font-size: 18px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: var(--color-primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            opacity: 0.9;
+        }
+
+        .btn-secondary {
+            background: var(--color-gray-200);
+            color: var(--color-gray-800);
+        }
+
+        .btn-success {
+            background: var(--color-success);
+            color: white;
+        }
+
+        .btn-warning {
+            background: var(--color-warning);
+            color: var(--color-gray-800);
+        }
+
+        .btn-danger {
+            background: var(--color-danger);
+            color: white;
+        }
+
+        .btn-sm {
+            padding: 4px 12px;
+            font-size: 12px;
+        }
+
+        .printer-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .printer-card {
+            background: var(--color-gray-100);
+            border-radius: 8px;
+            padding: 16px;
+            border: 1px solid var(--color-gray-200);
+        }
+
+        .printer-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .printer-name {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .printer-type {
+            font-size: 12px;
+            color: var(--color-gray-600);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .status-badge.online {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-badge.offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-badge.sleeping {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .printer-info {
+            font-size: 14px;
+            color: var(--color-gray-600);
+            margin-bottom: 12px;
+        }
+
+        .printer-actions {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .job-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .job-table th,
+        .job-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--color-gray-200);
+        }
+
+        .job-table th {
+            font-weight: 600;
+            color: var(--color-gray-600);
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+
+        .job-status {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+
+        .job-status.completed {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .job-status.failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .job-status.printing {
+            background: #cce5ff;
+            color: #004085;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            padding: 24px;
+            max-width: 500px;
+            width: 100%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .modal-header h3 {
+            font-size: 18px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--color-gray-600);
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 6px;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--color-gray-300);
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 24px;
+            border-radius: 6px;
+            color: white;
+            font-size: 14px;
+            animation: slideIn 0.3s ease;
+            z-index: 1001;
+        }
+
+        .toast.success { background: var(--color-success); }
+        .toast.error { background: var(--color-danger); }
+        .toast.warning { background: var(--color-warning); color: var(--color-gray-800); }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--color-gray-600);
+        }
+
+        .empty-state p {
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>EGS Print Service</h1>
+            <span class="version">v1.0.0</span>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-card">
+                <h3>Service Status</h3>
+                <div class="value" id="serviceStatus">--</div>
+            </div>
+            <div class="status-card">
+                <h3>Printers</h3>
+                <div class="value" id="printerCount">0</div>
+            </div>
+            <div class="status-card">
+                <h3>Jobs Today</h3>
+                <div class="value" id="jobCount">0</div>
+            </div>
+        </div>
+
+        <!-- Printers Section -->
+        <div class="section">
+            <div class="section-header">
+                <h2>Printers</h2>
+                <div>
+                    <button class="btn btn-secondary" onclick="discoverPrinters()">Discover</button>
+                    <button class="btn btn-primary" onclick="showAddModal()">+ Add Printer</button>
+                </div>
+            </div>
+
+            <div id="printerGrid" class="printer-grid">
+                <div class="empty-state">
+                    <p>No printers configured</p>
+                    <button class="btn btn-primary" onclick="discoverPrinters()">Discover Printers</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Jobs Section -->
+        <div class="section">
+            <div class="section-header">
+                <h2>Recent Jobs</h2>
+                <button class="btn btn-secondary btn-sm" onclick="loadJobs()">Refresh</button>
+            </div>
+
+            <table class="job-table">
+                <thead>
+                    <tr>
+                        <th>Job ID</th>
+                        <th>Printer</th>
+                        <th>Document</th>
+                        <th>Status</th>
+                        <th>Time</th>
+                    </tr>
+                </thead>
+                <tbody id="jobsTable">
+                    <tr>
+                        <td colspan="5" style="text-align: center; color: var(--color-gray-600);">
+                            No recent jobs
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Add Printer Modal -->
+    <div class="modal" id="addModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Add Printer</h3>
+                <button class="modal-close" onclick="hideAddModal()">&times;</button>
+            </div>
+
+            <form id="addPrinterForm" onsubmit="addPrinter(event)">
+                <div class="form-group">
+                    <label>Printer Name</label>
+                    <input type="text" name="name" required placeholder="e.g., Main Badge Printer">
+                </div>
+
+                <div class="form-group">
+                    <label>Printer Type</label>
+                    <select name="printer_type" required onchange="updateConnectionFields(this)">
+                        <option value="">Select type...</option>
+                        <option value="evolis">Evolis (Badge)</option>
+                        <option value="zebra">Zebra (Label)</option>
+                        <option value="cab">CAB (Label)</option>
+                        <option value="sato">SATO (Label)</option>
+                        <option value="star">Star (Thermal)</option>
+                        <option value="epson">Epson (Thermal)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Connection Mode</label>
+                    <select name="connection_mode" required>
+                        <option value="usb">USB</option>
+                        <option value="network">Network</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="networkFields" style="display: none;">
+                    <label>Host/IP Address</label>
+                    <input type="text" name="host" placeholder="192.168.1.100">
+                </div>
+
+                <div class="form-group" id="portField" style="display: none;">
+                    <label>Port</label>
+                    <input type="number" name="port" value="9100">
+                </div>
+
+                <div class="form-group">
+                    <label>Location (optional)</label>
+                    <input type="text" name="location" placeholder="e.g., Main Kitchen">
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="width: 100%;">Add Printer</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Power Settings Modal -->
+    <div class="modal" id="powerModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Power Settings</h3>
+                <button class="modal-close" onclick="hidePowerModal()">&times;</button>
+            </div>
+
+            <div id="powerModalContent">
+                <div class="form-group">
+                    <label>Sleep Timeout (minutes)</label>
+                    <input type="number" id="sleepTimeout" min="0" max="120" value="30">
+                    <p style="font-size: 12px; color: var(--color-gray-600); margin-top: 4px;">
+                        Set to 0 to disable sleep
+                    </p>
+                </div>
+
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button class="btn btn-primary" onclick="setSleepTimeout()">Save Timeout</button>
+                    <button class="btn btn-success" onclick="wakePrinter()">Wake</button>
+                    <button class="btn btn-warning" onclick="flashLED()">Flash LED</button>
+                    <button class="btn btn-danger" onclick="rebootPrinter()">Reboot</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = window.location.origin;
+        let currentPrinterId = null;
+
+        // Load on page init
+        document.addEventListener('DOMContentLoaded', () => {
+            checkHealth();
+            loadPrinters();
+            loadJobs();
+
+            // Auto-refresh every 30 seconds
+            setInterval(() => {
+                checkHealth();
+                loadPrinters();
+            }, 30000);
+        });
+
+        // Toast notification
+        function showToast(message, type = 'success') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // API request helper
+        async function api(endpoint, options = {}) {
+            try {
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    headers: { 'Content-Type': 'application/json' },
+                    ...options
+                });
+                return await response.json();
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        }
+
+        // Check service health
+        async function checkHealth() {
+            const result = await api('/health');
+            const statusEl = document.getElementById('serviceStatus');
+
+            if (result.status === 'online') {
+                statusEl.textContent = 'Online';
+                statusEl.className = 'value status-online';
+            } else {
+                statusEl.textContent = 'Offline';
+                statusEl.className = 'value status-offline';
+            }
+        }
+
+        // Load printers
+        async function loadPrinters() {
+            const result = await api('/api/printers');
+            const grid = document.getElementById('printerGrid');
+            const countEl = document.getElementById('printerCount');
+
+            if (!result.printers || result.printers.length === 0) {
+                grid.innerHTML = `
+                    <div class="empty-state">
+                        <p>No printers configured</p>
+                        <button class="btn btn-primary" onclick="discoverPrinters()">Discover Printers</button>
+                    </div>
+                `;
+                countEl.textContent = '0';
+                return;
+            }
+
+            countEl.textContent = result.printers.length;
+
+            grid.innerHTML = result.printers.map(p => `
+                <div class="printer-card">
+                    <div class="printer-card-header">
+                        <div>
+                            <div class="printer-name">${p.name}</div>
+                            <div class="printer-type">${p.printer_type.toUpperCase()} - ${p.model || 'Unknown'}</div>
+                        </div>
+                        <span class="status-badge ${p.status}">${p.status}</span>
+                    </div>
+                    <div class="printer-info">
+                        ${p.connection_mode === 'network' ? `${p.host}:${p.port}` : 'USB'}
+                        ${p.location ? ` | ${p.location}` : ''}
+                    </div>
+                    <div class="printer-actions">
+                        <button class="btn btn-secondary btn-sm" onclick="testPrinter('${p.id}')">Test</button>
+                        <button class="btn btn-secondary btn-sm" onclick="getStatus('${p.id}')">Status</button>
+                        ${p.printer_type === 'evolis' ? `
+                            <button class="btn btn-primary btn-sm" onclick="showPowerModal('${p.id}')">Power</button>
+                        ` : ''}
+                        <button class="btn btn-danger btn-sm" onclick="deletePrinter('${p.id}')">Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Load jobs
+        async function loadJobs() {
+            const result = await api('/api/jobs?limit=10');
+            const tbody = document.getElementById('jobsTable');
+            const countEl = document.getElementById('jobCount');
+
+            if (!result.jobs || result.jobs.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="5" style="text-align: center; color: var(--color-gray-600);">
+                            No recent jobs
+                        </td>
+                    </tr>
+                `;
+                countEl.textContent = '0';
+                return;
+            }
+
+            countEl.textContent = result.jobs.length;
+
+            tbody.innerHTML = result.jobs.map(j => `
+                <tr>
+                    <td><code>${j.id}</code></td>
+                    <td>${j.printer_id}</td>
+                    <td>${j.document_name}</td>
+                    <td><span class="job-status ${j.status}">${j.status}</span></td>
+                    <td>${new Date(j.created_at).toLocaleString()}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Discover printers
+        async function discoverPrinters() {
+            showToast('Discovering printers...', 'warning');
+            const result = await api('/api/discover');
+
+            if (result.discovered && result.discovered.length > 0) {
+                showToast(`Found ${result.discovered.length} printer(s)`, 'success');
+                // TODO: Show discovery results and allow user to add
+                console.log('Discovered:', result.discovered);
+            } else {
+                showToast('No printers discovered', 'warning');
+            }
+        }
+
+        // Add printer modal
+        function showAddModal() {
+            document.getElementById('addModal').classList.add('active');
+        }
+
+        function hideAddModal() {
+            document.getElementById('addModal').classList.remove('active');
+            document.getElementById('addPrinterForm').reset();
+        }
+
+        function updateConnectionFields(select) {
+            const mode = document.querySelector('[name="connection_mode"]');
+            const networkFields = document.getElementById('networkFields');
+            const portField = document.getElementById('portField');
+
+            mode.addEventListener('change', () => {
+                if (mode.value === 'network') {
+                    networkFields.style.display = 'block';
+                    portField.style.display = 'block';
+                } else {
+                    networkFields.style.display = 'none';
+                    portField.style.display = 'none';
+                }
+            });
+        }
+
+        async function addPrinter(e) {
+            e.preventDefault();
+            const form = e.target;
+            const data = {
+                name: form.name.value,
+                printer_type: form.printer_type.value,
+                connection_mode: form.connection_mode.value,
+                host: form.host.value || null,
+                port: parseInt(form.port.value) || 9100,
+                location: form.location.value,
+            };
+
+            const result = await api('/api/printers', {
+                method: 'POST',
+                body: JSON.stringify(data)
+            });
+
+            if (result.success) {
+                showToast('Printer added successfully');
+                hideAddModal();
+                loadPrinters();
+            } else {
+                showToast(result.error || 'Failed to add printer', 'error');
+            }
+        }
+
+        // Printer actions
+        async function testPrinter(id) {
+            showToast('Testing connection...', 'warning');
+            const result = await api(`/api/printers/${id}/test`, { method: 'POST' });
+
+            if (result.success) {
+                showToast('Connection successful');
+            } else {
+                showToast(result.error || 'Connection failed', 'error');
+            }
+            loadPrinters();
+        }
+
+        async function getStatus(id) {
+            const result = await api(`/api/printers/${id}/status`);
+
+            if (result.success) {
+                showToast(`Status: ${result.status}`);
+            } else {
+                showToast(result.error || 'Failed to get status', 'error');
+            }
+            loadPrinters();
+        }
+
+        async function deletePrinter(id) {
+            if (!confirm('Delete this printer?')) return;
+
+            const result = await api(`/api/printers/${id}`, { method: 'DELETE' });
+
+            if (result.success) {
+                showToast('Printer deleted');
+                loadPrinters();
+            } else {
+                showToast(result.error || 'Failed to delete', 'error');
+            }
+        }
+
+        // Power management modal
+        function showPowerModal(id) {
+            currentPrinterId = id;
+            document.getElementById('powerModal').classList.add('active');
+            loadSleepTimeout();
+        }
+
+        function hidePowerModal() {
+            document.getElementById('powerModal').classList.remove('active');
+            currentPrinterId = null;
+        }
+
+        async function loadSleepTimeout() {
+            const result = await api(`/api/printers/${currentPrinterId}/power/sleep-timeout`);
+            if (result.sleep_timeout_minutes !== null) {
+                document.getElementById('sleepTimeout').value = result.sleep_timeout_minutes;
+            }
+        }
+
+        async function setSleepTimeout() {
+            const minutes = parseInt(document.getElementById('sleepTimeout').value);
+            const result = await api(`/api/printers/${currentPrinterId}/power/sleep-timeout`, {
+                method: 'POST',
+                body: JSON.stringify({ minutes })
+            });
+
+            if (result.success) {
+                showToast('Sleep timeout updated');
+            } else {
+                showToast(result.error || 'Failed to update', 'error');
+            }
+        }
+
+        async function wakePrinter() {
+            const result = await api(`/api/printers/${currentPrinterId}/power/wake`, { method: 'POST' });
+
+            if (result.success) {
+                showToast('Wake command sent');
+            } else {
+                showToast(result.error || 'Failed to wake', 'error');
+            }
+        }
+
+        async function flashLED() {
+            const result = await api(`/api/printers/${currentPrinterId}/power/led-flash`, {
+                method: 'POST',
+                body: JSON.stringify({ duration: 5 })
+            });
+
+            if (result.success) {
+                showToast('LED flash triggered');
+            } else {
+                showToast(result.error || 'Failed to flash LED', 'error');
+            }
+        }
+
+        async function rebootPrinter() {
+            if (!confirm('Reboot this printer?')) return;
+
+            const result = await api(`/api/printers/${currentPrinterId}/power/reboot`, { method: 'POST' });
+
+            if (result.success) {
+                showToast('Reboot command sent');
+            } else {
+                showToast(result.error || 'Failed to reboot', 'error');
+            }
+        }
+    </script>
+</body>
+</html>
