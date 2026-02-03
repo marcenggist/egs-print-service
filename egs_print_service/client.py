@@ -163,12 +163,45 @@ class PrintClient:
     # =========================================================================
 
     def get_status(self, printer_id: str) -> Dict[str, Any]:
-        """Get printer status."""
+        """Get detailed printer status (paper, ribbon, head status, etc.)."""
         return self._request('GET', f'/api/printers/{printer_id}/status')
 
     def test_connection(self, printer_id: str) -> Dict[str, Any]:
-        """Test printer connection."""
+        """Test printer connection (quick TCP check)."""
         return self._request('POST', f'/api/printers/{printer_id}/test')
+
+    def get_all_status(self) -> Dict[str, Any]:
+        """
+        Check online/offline status for ALL printers at once.
+
+        Returns:
+            Dict with printers list and summary counts
+            Example: {'printers': [...], 'summary': {'total': 2, 'online': 1, 'offline': 1}}
+        """
+        return self._request('GET', '/api/printers/status')
+
+    def is_printer_online(self, printer_id: str) -> bool:
+        """
+        Quick check if a specific printer is online.
+
+        Args:
+            printer_id: Printer ID to check
+
+        Returns:
+            True if online, False if offline or error
+        """
+        result = self.test_connection(printer_id)
+        return result.get('success', False)
+
+    def list_printers_with_status(self) -> List[Dict[str, Any]]:
+        """
+        List all printers with their online/offline status.
+
+        Returns:
+            List of printer dicts with 'is_online' field
+        """
+        result = self._request('GET', '/api/printers?status=true')
+        return result.get('printers', [])
 
     # =========================================================================
     # Power Management (Evolis)

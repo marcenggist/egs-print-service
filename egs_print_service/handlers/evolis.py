@@ -51,6 +51,10 @@ class EvolisHandler(BaseHandler):
         Args:
             image_data: Raw image bytes (PNG or JPEG)
             copies: Number of copies (default 1)
+            orientation: 'landscape' (default), 'portrait', or 'auto'
+                - landscape: CR-80 standard (3.375" x 2.125"), rotates portrait images
+                - portrait: Rotates to portrait mode (2.125" x 3.375")
+                - auto: Keeps original image orientation
 
         Returns:
             Dict with success status
@@ -67,6 +71,7 @@ class EvolisHandler(BaseHandler):
 
             # Load image
             image = Image.open(BytesIO(image_data))
+            orientation = kwargs.get('orientation', 'landscape')
 
             # Create printer DC
             hdc = win32ui.CreateDC()
@@ -74,15 +79,40 @@ class EvolisHandler(BaseHandler):
             hdc.StartDoc(kwargs.get('document_name', 'EGS Print Service'))
             hdc.StartPage()
 
-            # CR-80 dimensions at printer DPI
+            # CR-80 card dimensions: 3.375" x 2.125"
             dpi_x = hdc.GetDeviceCaps(88)
             dpi_y = hdc.GetDeviceCaps(90)
-            w = int(3.375 * dpi_x)  # CR-80 width in inches
-            h = int(2.125 * dpi_y)  # CR-80 height in inches
 
-            # Convert and resize
+            # Convert to RGB if needed
             if image.mode != 'RGB':
                 image = image.convert('RGB')
+
+            img_w, img_h = image.size
+            is_portrait_image = img_h > img_w
+
+            if orientation == 'landscape':
+                # CR-80 landscape: 3.375" x 2.125" (wider than tall)
+                w = int(3.375 * dpi_x)
+                h = int(2.125 * dpi_y)
+                # If image is portrait, rotate it to landscape
+                if is_portrait_image:
+                    image = image.rotate(90, expand=True)
+            elif orientation == 'portrait':
+                # CR-80 portrait: 2.125" x 3.375" (taller than wide)
+                w = int(2.125 * dpi_x)
+                h = int(3.375 * dpi_y)
+                # If image is landscape, rotate it to portrait
+                if not is_portrait_image:
+                    image = image.rotate(90, expand=True)
+            else:  # 'auto' - match image orientation
+                if is_portrait_image:
+                    w = int(2.125 * dpi_x)
+                    h = int(3.375 * dpi_y)
+                else:
+                    w = int(3.375 * dpi_x)
+                    h = int(2.125 * dpi_y)
+
+            # Resize to target dimensions
             image = image.resize((w, h), Image.Resampling.LANCZOS)
 
             # Print
@@ -97,7 +127,10 @@ class EvolisHandler(BaseHandler):
                 'success': True,
                 'printer': printer_name,
                 'size': f'{w}x{h}',
-                'dpi': f'{dpi_x}x{dpi_y}'
+                'dpi': f'{dpi_x}x{dpi_y}',
+                'orientation': orientation,
+                'rotated': (orientation == 'landscape' and is_portrait_image) or
+                           (orientation == 'portrait' and not is_portrait_image)
             }
 
         except ImportError as e:

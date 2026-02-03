@@ -660,7 +660,22 @@ def legacy_print():
     handler = EvolisHandler(evolis_printer)
     try:
         image_data = base64.b64decode(data['image_base64'])
-        result = handler.print_image(image_data)
+
+        # Get options from request (orientation, document_name, etc.)
+        options = data.get('options', {})
+        document_name = data.get('document_name', 'Badge Print')
+        copies = data.get('copies', 1)
+
+        # Default to landscape for CR-80 badges
+        orientation = options.get('orientation', 'landscape')
+
+        result = handler.print_image(
+            image_data,
+            orientation=orientation,
+            document_name=document_name,
+            copies=copies,
+            **options
+        )
         return jsonify(result)
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
