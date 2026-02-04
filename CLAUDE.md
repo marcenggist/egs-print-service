@@ -130,3 +130,25 @@ egs-print-service/
 
 ## Deployment
 On hotel PCs: PyInstaller builds a single `.exe` that runs as a Windows service or tray app. Each EGS product connects to `http://localhost:5100` (or the PC's LAN IP for remote printing).
+
+## Office Network Setup
+See [docs/OFFICE_NETWORK_SETUP.md](docs/OFFICE_NETWORK_SETUP.md) for:
+- Network device inventory (IPs, MACs, hostnames)
+- Printer configuration details
+- Intel PC setup (DESKTOP-QVS7KUG at 192.168.1.36)
+- Troubleshooting guides
+
+## Planned Features
+
+### USB Scale Support (TODO)
+Adding support for USB scales to read weight data. Will be exposed via API:
+```
+GET  /api/scales                    → List connected scales
+GET  /api/scales/{id}/weight        → Read current weight
+POST /api/scales/{id}/tare          → Tare the scale
+```
+
+Potential scale protocols to support:
+- HID (generic USB scales)
+- Serial/RS-232 scales
+- Specific brands: CAS, Ohaus, Adam Equipment
