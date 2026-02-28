@@ -22,6 +22,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+nul
 
 # Service data (local printer config)
 ~/.egs_print_service/

@@ -454,6 +454,75 @@ def print_to_printer(printer_id):
         return jsonify({'success': False, 'error': str(e), 'job': job.to_dict()}), 500
 
 
+@app.route('/api/printers/<printer_id>/print/raw', methods=['POST'])
+def print_raw_to_printer(printer_id):
+    """Submit raw print job (ZPL, TSPL, ESC/POS, SBPL commands)."""
+    if not _check_api_key():
+        return jsonify({'success': False, 'error': 'Invalid API key'}), 401
+
+    printer = _printers.get(printer_id)
+    if not printer:
+        return jsonify({'success': False, 'error': 'Printer not found'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'Request body required'}), 400
+
+    raw_code = data.get('raw_code')
+    if not raw_code:
+        return jsonify({'success': False, 'error': 'raw_code required'}), 400
+
+    # Create job
+    job = PrintJob(
+        printer_id=printer_id,
+        document_name=data.get('document_name', 'Raw Print Job'),
+        copies=data.get('copies', 1),
+        source_ip=request.remote_addr,
+    )
+    job.start()
+
+    # Get handler
+    handler_class = get_handler(PRINTER_TYPES[printer.printer_type]['handler'])
+    if not handler_class:
+        job.fail('Handler not found')
+        return jsonify({'success': False, 'error': 'Handler not found'}), 500
+
+    handler = handler_class(printer)
+
+    try:
+        # Send raw code via TCP socket (works for ZPL, TSPL, SBPL, ESC/POS)
+        if hasattr(handler, '_send_zpl'):
+            result = handler._send_zpl(raw_code)
+        elif hasattr(handler, '_send_raw'):
+            result = handler._send_raw(raw_code)
+        else:
+            job.fail('Printer handler does not support raw command printing')
+            return jsonify({
+                'success': False,
+                'error': 'Printer handler does not support raw command printing',
+                'job': job.to_dict(),
+            }), 400
+
+        if result['success']:
+            job.complete()
+            result['format'] = 'raw'
+            printer.update_status('ready')
+        else:
+            job.fail(result.get('error', 'Print failed'))
+            printer.update_status('error', result.get('error'))
+
+        _jobs.append(job)
+        _save_printers()
+
+        result['job'] = job.to_dict()
+        return jsonify(result)
+
+    except Exception as e:
+        job.fail(str(e))
+        _jobs.append(job)
+        return jsonify({'success': False, 'error': str(e), 'job': job.to_dict()}), 500
+
+
 # =============================================================================
 # Power Management (Evolis)
 # =============================================================================
