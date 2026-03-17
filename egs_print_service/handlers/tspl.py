@@ -28,8 +28,9 @@ Key Commands:
 """
 
 import socket
+import sys
 from io import BytesIO
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from .base import BaseHandler
 from ..models import Printer
@@ -53,38 +54,90 @@ class TSPLHandler(BaseHandler):
         port = self.printer.port or self.DEFAULT_PORT
         return host, port
 
-    def _send_tspl(self, commands: List[str], timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
-        """
-        Send TSPL commands to printer.
+    def _is_usb(self) -> bool:
+        """Check if this printer uses USB (Windows spooler) connection."""
+        return (
+            self.printer.connection_mode == 'usb'
+            or (not self.printer.host and self.printer.windows_name)
+        )
 
-        Args:
-            commands: List of TSPL command strings
-            timeout: Connection timeout
-
-        Returns:
-            Dict with success status
+    def _send_raw_usb(self, data: bytes) -> Dict[str, Any]:
         """
+        Send raw bytes to printer via Windows print spooler (USB).
+
+        Uses win32print.WritePrinter to send raw data directly,
+        bypassing the driver (RAW datatype).
+        """
+        if sys.platform != 'win32':
+            return {'success': False, 'error': 'USB printing requires Windows'}
+
+        windows_name = self.printer.windows_name
+        if not windows_name:
+            return {'success': False, 'error': 'No windows_name configured for USB printer'}
+
+        try:
+            import win32print
+
+            handle = win32print.OpenPrinter(windows_name)
+            try:
+                win32print.StartDocPrinter(handle, 1, ('TSPL Raw', None, 'RAW'))
+                win32print.StartPagePrinter(handle)
+                win32print.WritePrinter(handle, data)
+                win32print.EndPagePrinter(handle)
+                win32print.EndDocPrinter(handle)
+            finally:
+                win32print.ClosePrinter(handle)
+
+            return {
+                'success': True,
+                'connection': 'usb',
+                'printer': windows_name,
+                'bytes_sent': len(data),
+            }
+
+        except ImportError:
+            return {'success': False, 'error': 'pywin32 not installed (pip install pywin32)'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _send_raw(self, raw_code: str) -> Dict[str, Any]:
+        """
+        Send raw TSPL command string to printer.
+        Routes to USB (win32print) or TCP based on printer config.
+        Used by the /print/raw endpoint.
+        """
+        if self._is_usb():
+            return self._send_raw_usb(raw_code.encode('utf-8'))
+        return self._send_raw_tcp(raw_code.encode('utf-8'))
+
+    def _send_raw_bytes(self, data: bytes) -> Dict[str, Any]:
+        """
+        Send raw binary data to printer (for font uploads etc.).
+        Routes to USB or TCP based on printer config.
+        """
+        if self._is_usb():
+            return self._send_raw_usb(data)
+        return self._send_raw_tcp(data)
+
+    def _send_raw_tcp(self, data: bytes, timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+        """Send raw bytes via TCP socket."""
         host, port = self._get_connection()
-
         if not host:
             return {'success': False, 'error': 'Printer host not configured'}
-
-        # Build command string (commands separated by newlines)
-        command_str = '\r\n'.join(commands) + '\r\n'
 
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(timeout)
             sock.connect((host, port))
-            sock.send(command_str.encode('utf-8'))
+            sock.sendall(data)
             sock.close()
 
             return {
                 'success': True,
+                'connection': 'tcp',
                 'host': host,
                 'port': port,
-                'bytes_sent': len(command_str),
-                'commands': len(commands)
+                'bytes_sent': len(data),
             }
 
         except socket.timeout:
@@ -93,6 +146,51 @@ class TSPLHandler(BaseHandler):
             return {'success': False, 'error': f'Connection refused by {host}:{port}'}
         except Exception as e:
             return {'success': False, 'error': str(e)}
+
+    def _send_tspl(self, commands: List[str], timeout: int = DEFAULT_TIMEOUT) -> Dict[str, Any]:
+        """
+        Send TSPL commands to printer.
+
+        Routes to USB (win32print) or TCP based on printer config.
+        """
+        # Build command string (commands separated by newlines)
+        command_str = '\r\n'.join(commands) + '\r\n'
+        data = command_str.encode('utf-8')
+
+        if self._is_usb():
+            result = self._send_raw_usb(data)
+        else:
+            result = self._send_raw_tcp(data, timeout)
+
+        if result['success']:
+            result['commands'] = len(commands)
+        return result
+
+    def download_font(self, font_data: bytes, filename: str) -> Dict[str, Any]:
+        """
+        Download (upload) a TTF font to printer flash memory.
+
+        TSPL syntax: DOWNLOAD F,"filename.TTF",size\\r\\n<binary data>
+
+        Args:
+            font_data: Raw TTF font binary
+            filename: Filename on printer (e.g. "PREPFAST.TTF", max 16 chars)
+
+        Returns:
+            Dict with success status
+        """
+        # Build the DOWNLOAD command header
+        header = f'DOWNLOAD F,"{filename}",{len(font_data)}\r\n'.encode('ascii')
+
+        # Concatenate header + font binary
+        combined = header + font_data
+
+        result = self._send_raw_bytes(combined)
+        if result['success']:
+            result['filename'] = filename
+            result['font_size'] = len(font_data)
+            result['message'] = f'Font {filename} ({len(font_data)} bytes) uploaded to printer'
+        return result
 
     def _image_to_tspl_bitmap(self, image_data: bytes, x: int = 0, y: int = 0) -> List[str]:
         """
@@ -330,66 +428,263 @@ class TSPLHandler(BaseHandler):
 
         return self._send_tspl(commands)
 
-    def get_status(self) -> Dict[str, Any]:
-        """Get printer status."""
-        host, port = self._get_connection()
+    # =========================================================================
+    # Bidirectional query (send command, read response)
+    # =========================================================================
 
+    def _query_usb(self, command: str, read_delay: float = 0.5,
+                   max_bytes: int = 4096) -> Dict[str, Any]:
+        """
+        Send a TSPL query command via USB.
+
+        USB via Windows spooler is write-only — ReadPrinter blocks/hangs on most
+        TSPL printer drivers. We send the command but cannot read the response.
+
+        For bidirectional queries, use TCP (network) connection instead.
+        """
+        if sys.platform != 'win32':
+            return {'success': False, 'error': 'USB query requires Windows'}
+
+        windows_name = self.printer.windows_name
+        if not windows_name:
+            return {'success': False, 'error': 'No windows_name configured'}
+
+        try:
+            import win32print
+
+            handle = win32print.OpenPrinter(windows_name)
+            try:
+                win32print.StartDocPrinter(handle, 1, ('TSPL Query', None, 'RAW'))
+                win32print.StartPagePrinter(handle)
+                win32print.WritePrinter(handle, (command + '\r\n').encode('ascii'))
+                win32print.EndPagePrinter(handle)
+                win32print.EndDocPrinter(handle)
+            finally:
+                win32print.ClosePrinter(handle)
+
+            return {
+                'success': True,
+                'response': '',
+                'note': 'USB printers do not support read-back via spooler. Use network connection for bidirectional queries.',
+            }
+
+        except ImportError:
+            return {'success': False, 'error': 'pywin32 not installed'}
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
+
+    def _query_tcp(self, command: str, timeout: int = 5,
+                   max_bytes: int = 4096) -> Dict[str, Any]:
+        """Send a TSPL query command via TCP and read the response."""
+        host, port = self._get_connection()
         if not host:
             return {'success': False, 'error': 'Printer host not configured'}
 
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(DEFAULT_TIMEOUT)
+            sock.settimeout(timeout)
             sock.connect((host, port))
+            sock.sendall((command + '\r\n').encode('ascii'))
 
-            # TSPL status command - returns printer status byte
-            sock.send(b'\x1b!?\r\n')  # ESC ! ? - status query
-
-            response = sock.recv(256)
+            # Read response (printer may take a moment)
+            import time
+            time.sleep(0.3)
+            chunks = []
+            try:
+                while True:
+                    chunk = sock.recv(max_bytes)
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+            except socket.timeout:
+                pass
             sock.close()
 
-            # Parse status response
-            status = 'unknown'
-            if response:
-                status_byte = response[0] if len(response) > 0 else 0
-
-                # Status bits (varies by printer model)
-                if status_byte == 0:
-                    status = 'ready'
-                elif status_byte & 0x01:
-                    status = 'head_open'
-                elif status_byte & 0x02:
-                    status = 'paper_jam'
-                elif status_byte & 0x04:
-                    status = 'paper_out'
-                elif status_byte & 0x08:
-                    status = 'ribbon_out'
-                elif status_byte & 0x10:
-                    status = 'paused'
-                elif status_byte & 0x20:
-                    status = 'printing'
-                else:
-                    status = 'ready'
-
-            return {
-                'success': True,
-                'host': host,
-                'port': port,
-                'status': status,
-                'raw_response': response.hex() if response else None
-            }
+            response = b''.join(chunks)
+            text = response.decode('utf-8', errors='replace').strip()
+            return {'success': True, 'response': text, 'raw_bytes': len(response)}
 
         except socket.timeout:
-            return {'success': False, 'error': 'Status query timeout', 'status': 'offline'}
-        except ConnectionRefusedError:
-            return {'success': False, 'error': 'Connection refused', 'status': 'offline'}
+            return {'success': False, 'error': f'Timeout querying {host}:{port}'}
         except Exception as e:
-            return {'success': False, 'error': str(e), 'status': 'error'}
+            return {'success': False, 'error': str(e)}
+
+    def _query(self, command: str, **kwargs) -> Dict[str, Any]:
+        """Send a query command and read response. Routes to USB or TCP."""
+        if self._is_usb():
+            return self._query_usb(command, **kwargs)
+        return self._query_tcp(command, **kwargs)
+
+    # =========================================================================
+    # Diagnostics
+    # =========================================================================
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get printer status (ready, paper out, head open, etc.)."""
+        if self._is_usb():
+            # USB: check via Windows spooler status
+            try:
+                import win32print
+                handle = win32print.OpenPrinter(self.printer.windows_name)
+                try:
+                    info = win32print.GetPrinter(handle, 2)
+                finally:
+                    win32print.ClosePrinter(handle)
+
+                status_code = info.get('Status', 0)
+                status_map = {
+                    0: 'ready', 1: 'paused', 2: 'error', 128: 'offline',
+                    512: 'busy', 1024: 'printing', 8192: 'waiting',
+                }
+                status = status_map.get(status_code, 'ready' if status_code == 0 else 'unknown')
+
+                return {
+                    'success': True,
+                    'status': status,
+                    'connection': 'usb',
+                    'printer': self.printer.windows_name,
+                    'windows_status_code': status_code,
+                    'jobs': info.get('cJobs', 0),
+                }
+            except Exception as e:
+                return {'success': False, 'status': 'error', 'error': str(e)}
+
+        # TCP: query via TSPL status command
+        result = self._query('\x1b!?')
+        if not result['success']:
+            result['status'] = 'offline'
+            return result
+
+        response = result.get('response', '')
+        raw = response.encode('latin-1', errors='replace') if response else b''
+
+        status = 'unknown'
+        if raw:
+            status_byte = raw[0]
+            if status_byte == 0:
+                status = 'ready'
+            elif status_byte & 0x01:
+                status = 'head_open'
+            elif status_byte & 0x02:
+                status = 'paper_jam'
+            elif status_byte & 0x04:
+                status = 'paper_out'
+            elif status_byte & 0x08:
+                status = 'ribbon_out'
+            elif status_byte & 0x10:
+                status = 'paused'
+            elif status_byte & 0x20:
+                status = 'printing'
+            else:
+                status = 'ready'
+
+        return {
+            'success': True,
+            'status': status,
+            'connection': 'tcp',
+            'raw_hex': raw.hex() if raw else None,
+        }
+
+    def get_info(self) -> Dict[str, Any]:
+        """Get printer info: firmware version, memory, mileage.
+
+        Only works over TCP — USB spooler doesn't support read-back.
+        """
+        if self._is_usb():
+            return {
+                'success': True,
+                'note': 'Bidirectional queries not supported over USB. Connect via network (TCP:9100) for full diagnostics.',
+                'connection': 'usb',
+                'printer': self.printer.windows_name,
+            }
+
+        results = {}
+
+        # Firmware version
+        ver = self._query('? VERSION')
+        results['version'] = ver.get('response', '') if ver['success'] else ver.get('error', '')
+
+        # Available memory (DRAM + flash)
+        mem = self._query('? MEMORY')
+        results['memory'] = mem.get('response', '') if mem['success'] else mem.get('error', '')
+
+        # Print mileage (total mm printed)
+        mil = self._query('? MILEAGE')
+        results['mileage'] = mil.get('response', '') if mil['success'] else mil.get('error', '')
+
+        return {'success': True, **results}
+
+    def list_files(self) -> Dict[str, Any]:
+        """
+        List all files stored in printer flash memory (fonts, images, forms).
+
+        TSPL command: ? FILES
+        Only works over TCP — USB spooler doesn't support read-back.
+        """
+        if self._is_usb():
+            return {
+                'success': True,
+                'files': [],
+                'count': 0,
+                'note': 'File listing not supported over USB. Connect via network (TCP:9100) to list files.',
+                'connection': 'usb',
+            }
+
+        result = self._query('? FILES')
+        if not result['success']:
+            return result
+
+        response = result.get('response', '')
+
+        # Parse file listing — typically one file per line: "filename,size"
+        files = []
+        for line in response.split('\n'):
+            line = line.strip()
+            if not line or line.startswith('?'):
+                continue
+            parts = line.split(',')
+            if len(parts) >= 2:
+                files.append({'name': parts[0].strip(), 'size': parts[1].strip()})
+            elif line:
+                files.append({'name': line, 'size': 'unknown'})
+
+        return {
+            'success': True,
+            'files': files,
+            'count': len(files),
+            'raw': response,
+        }
+
+    def delete_file(self, filename: str) -> Dict[str, Any]:
+        """Delete a file from printer flash memory."""
+        return self._send_raw(f'KILL "{filename}"\r\n')
+
+    def selftest(self) -> Dict[str, Any]:
+        """Print a self-test page showing all printer settings."""
+        return self._send_raw('SELFTEST\r\n')
+
+    # =========================================================================
+    # Connection & calibration
+    # =========================================================================
 
     def test_connection(self) -> Dict[str, Any]:
         """Test connection to printer."""
-        host, port = self._get_connection()
+        if self._is_usb():
+            # For USB, try opening the printer handle
+            try:
+                import win32print
+                handle = win32print.OpenPrinter(self.printer.windows_name)
+                win32print.ClosePrinter(handle)
+                return {
+                    'success': True,
+                    'connection': 'usb',
+                    'printer': self.printer.windows_name,
+                    'message': 'USB connection successful',
+                }
+            except Exception as e:
+                return {'success': False, 'error': str(e)}
 
+        host, port = self._get_connection()
         if not host:
             return {'success': False, 'error': 'Printer host not configured'}
 
@@ -398,14 +693,13 @@ class TSPLHandler(BaseHandler):
             sock.settimeout(5)
             sock.connect((host, port))
             sock.close()
-
             return {
                 'success': True,
+                'connection': 'tcp',
                 'host': host,
                 'port': port,
-                'message': 'TCP connection successful'
+                'message': 'TCP connection successful',
             }
-
         except socket.timeout:
             return {'success': False, 'error': f'Connection timeout to {host}:{port}'}
         except ConnectionRefusedError:
@@ -414,32 +708,15 @@ class TSPLHandler(BaseHandler):
             return {'success': False, 'error': str(e)}
 
     def calibrate(self) -> Dict[str, Any]:
-        """
-        Run automatic label calibration.
-
-        The printer will feed labels to detect gap/size.
-        """
-        commands = [
-            'GAPDETECT',  # Auto-detect gap
-        ]
-        return self._send_tspl(commands)
+        """Run automatic label calibration (feeds labels to detect gap/size)."""
+        return self._send_tspl(['GAPDETECT'])
 
     def feed(self, count: int = 1) -> Dict[str, Any]:
         """Feed labels."""
-        commands = [
-            f'FORMFEED',  # Feed one label
-        ] * count
-        return self._send_tspl(commands)
+        return self._send_tspl(['FORMFEED'] * count)
 
     def set_label_size(self, width_mm: int, height_mm: int, gap_mm: int = 2) -> Dict[str, Any]:
-        """
-        Configure label size.
-
-        Args:
-            width_mm: Label width in mm
-            height_mm: Label height in mm
-            gap_mm: Gap between labels in mm
-        """
+        """Configure label size."""
         commands = [
             f'SIZE {width_mm} mm,{height_mm} mm',
             f'GAP {gap_mm} mm,0 mm',

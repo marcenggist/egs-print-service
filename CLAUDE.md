@@ -138,6 +138,57 @@ See [docs/OFFICE_NETWORK_SETUP.md](docs/OFFICE_NETWORK_SETUP.md) for:
 - Intel PC setup (DESKTOP-QVS7KUG at 192.168.1.36)
 - Troubleshooting guides
 
+## Working with Claude Code
+
+### What Claude Code does in this project
+
+Claude Code is the AI coding assistant used across all EGS projects. In this repo it:
+
+- Reads and edits Python source files, adds new printer handlers, fixes bugs
+- Runs HTTP tests against the local service (`curl http://localhost:5100/...`)
+- Writes and runs Python scripts to test printer connectivity
+- Updates documentation (`CLAUDE.md`, `docs/OFFICE_NETWORK_SETUP.md`)
+
+### Scope of projects Claude Code manages together
+
+All of these are worked on in the same Claude Code session (shared memory):
+
+| Project | Path | Language | Role |
+|---------|------|----------|------|
+| egs-print-service | `c:/Projects/egs-print-service` | Python | Local printer HTTP agent |
+| egs-print-service-go | `c:/Projects/egs-print-service-go` | Go | Go rewrite (Windows + Android) |
+| prepfast-server | `c:/Projects/prepfast-server` | Go | Cloud API for label audit |
+| prepfast-web | `c:/Projects/prepfast-web` | React/TS | Admin dashboard + mobile quick-print |
+
+### How Claude Code works
+
+1. **Reads before editing** — always reads a file before changing it
+2. **Runs scripts to verify** — uses `curl`, Python, `gh`, `ssh` to test things live
+3. **Persistent memory** — saves key facts across sessions in `~/.claude/projects/.../memory/`
+
+Memory files:
+
+- `MEMORY.md` — loaded every session: project overview, credentials, IPs
+- `prepfast-server.md` — Go API endpoints, schema, gotchas
+- `prepfast-web.md` — React frontend routes, API client, RPCs
+- `egs-print-service-go.md` — Go agent architecture, CI, TODO list
+
+### Key credentials & access (in memory, not in code)
+
+- **Supabase project:** `kgudcphfmrojnnerehvb` (shared by all EGS projects)
+- **Production VPS:** `ssh -i ~/.ssh/calcmenu-deploy-key.pem ubuntu@84.234.29.96`
+- **Office printer PC:** Tailscale `100.97.196.7:5100` (DESKTOP-MHKI961, Neuchâtel)
+- **API key for egs-print-service:** `egs-print-2026` (header: `Authorization: Bearer egs-print-2026`)
+- **PrepFast API:** `https://prepfast.calcmenu.io`
+
+### How to ask Claude Code for help
+
+- **"Run this"** → Claude Code runs curl/Python scripts to test live
+- **"Check the printers"** → Claude Code connects to Tailscale IP and queries the service
+- **"Deploy"** → Claude Code runs `./scripts/deploy.sh` and checks logs
+- **"Document"** → Claude Code updates CLAUDE.md and memory files
+- **"Put on GitHub"** → Claude Code initializes git, creates private repo via `gh`, pushes
+
 ## Planned Features
 
 ### USB Scale Support (TODO)

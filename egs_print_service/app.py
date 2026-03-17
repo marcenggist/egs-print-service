@@ -524,6 +524,158 @@ def print_raw_to_printer(printer_id):
 
 
 # =============================================================================
+# Capabilities — discover what a printer supports
+# =============================================================================
+
+@app.route('/api/printers/<printer_id>/capabilities', methods=['GET'])
+def get_printer_capabilities(printer_id):
+    """Return which features this printer supports (font upload, diagnostics, etc.)."""
+    if not _check_api_key():
+        return jsonify({'success': False, 'error': 'Invalid API key'}), 401
+
+    printer = _printers.get(printer_id)
+    if not printer:
+        return jsonify({'success': False, 'error': 'Printer not found'}), 404
+
+    handler_class = get_handler(PRINTER_TYPES[printer.printer_type]['handler'])
+    if not handler_class:
+        return jsonify({'success': False, 'error': 'Handler not found'}), 500
+
+    handler = handler_class(printer)
+    return jsonify({
+        'success': True,
+        'printer_id': printer_id,
+        'printer_type': printer.printer_type,
+        'handler': PRINTER_TYPES[printer.printer_type]['handler'],
+        'capabilities': handler.get_capabilities(),
+    })
+
+
+# =============================================================================
+# Font Management (TSPL printers)
+# =============================================================================
+
+@app.route('/api/printers/<printer_id>/font', methods=['POST'])
+def upload_font_to_printer(printer_id):
+    """Upload a TTF font to printer flash memory (TSPL DOWNLOAD command)."""
+    if not _check_api_key():
+        return jsonify({'success': False, 'error': 'Invalid API key'}), 401
+
+    printer = _printers.get(printer_id)
+    if not printer:
+        return jsonify({'success': False, 'error': 'Printer not found'}), 404
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'Request body required'}), 400
+
+    filename = data.get('filename', 'PREPFAST.TTF')
+    font_b64 = data.get('font_base64')
+    if not font_b64:
+        return jsonify({'success': False, 'error': 'font_base64 required'}), 400
+
+    import base64
+    try:
+        font_data = base64.b64decode(font_b64)
+    except Exception:
+        return jsonify({'success': False, 'error': 'Invalid base64 data'}), 400
+
+    # Get handler (must be TSPL-based)
+    handler_class = get_handler(PRINTER_TYPES[printer.printer_type]['handler'])
+    if not handler_class:
+        return jsonify({'success': False, 'error': 'Handler not found'}), 500
+
+    handler = handler_class(printer)
+    try:
+        result = handler.download_font(font_data, filename)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+# =============================================================================
+# Printer Diagnostics (TSPL printers — Gainsha, TSC, PrepSafe)
+# =============================================================================
+
+@app.route('/api/printers/<printer_id>/info', methods=['GET'])
+def get_printer_info(printer_id):
+    """Get printer info: firmware, memory, mileage."""
+    if not _check_api_key():
+        return jsonify({'success': False, 'error': 'Invalid API key'}), 401
+
+    printer = _printers.get(printer_id)
+    if not printer:
+        return jsonify({'success': False, 'error': 'Printer not found'}), 404
+
+    handler_class = get_handler(PRINTER_TYPES[printer.printer_type]['handler'])
+    if not handler_class:
+        return jsonify({'success': False, 'error': 'Handler not found'}), 500
+
+    handler = handler_class(printer)
+    return jsonify(handler.get_info())
+
+
+@app.route('/api/printers/<printer_id>/files', methods=['GET'])
+def list_printer_files(printer_id):
+    """List files stored in printer flash memory (fonts, images, forms)."""
+    if not _check_api_key():
+        return jsonify({'success': False, 'error': 'Invalid API key'}), 401
+
+    printer = _printers.get(printer_id)
+    if not printer:
+        return jsonify({'success': False, 'error': 'Printer not found'}), 404
+
+    handler_class = get_handler(PRINTER_TYPES[printer.printer_type]['handler'])
+    if not handler_class:
+        return jsonify({'success': False, 'error': 'Handler not found'}), 500
+
+    handler = handler_class(printer)
+    return jsonify(handler.list_files())
+
+
+@app.route('/api/printers/<printer_id>/files/<filename>', methods=['DELETE'])
+def delete_printer_file(printer_id, filename):
+    """Delete a file from printer flash memory."""
+    if not _check_api_key():
+        return jsonify({'success': False, 'error': 'Invalid API key'}), 401
+
+    printer = _printers.get(printer_id)
+    if not printer:
+        return jsonify({'success': False, 'error': 'Printer not found'}), 404
+
+    handler_class = get_handler(PRINTER_TYPES[printer.printer_type]['handler'])
+    if not handler_class:
+        return jsonify({'success': False, 'error': 'Handler not found'}), 500
+
+    handler = handler_class(printer)
+    result = handler.delete_file(filename)
+    if result['success']:
+        result['message'] = f'File "{filename}" deleted from printer'
+    return jsonify(result)
+
+
+@app.route('/api/printers/<printer_id>/selftest', methods=['POST'])
+def printer_selftest(printer_id):
+    """Print a self-test page showing all printer settings."""
+    if not _check_api_key():
+        return jsonify({'success': False, 'error': 'Invalid API key'}), 401
+
+    printer = _printers.get(printer_id)
+    if not printer:
+        return jsonify({'success': False, 'error': 'Printer not found'}), 404
+
+    handler_class = get_handler(PRINTER_TYPES[printer.printer_type]['handler'])
+    if not handler_class:
+        return jsonify({'success': False, 'error': 'Handler not found'}), 500
+
+    handler = handler_class(printer)
+    result = handler.selftest()
+    if result['success']:
+        result['message'] = 'Self-test page sent to printer'
+    return jsonify(result)
+
+
+# =============================================================================
 # Power Management (Evolis)
 # =============================================================================
 
