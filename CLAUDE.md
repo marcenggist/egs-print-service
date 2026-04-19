@@ -1,5 +1,44 @@
 # EGS Print Service
 
+## EGS Context
+
+### Azure Key Vault
+**Vault:** `kv-egs-automation` (RG `RG-EGS-AUTOMATION`, sub `Microsoft Partner Network Credit 1`)
+- Firewall: **Deny by default**. Allowed: VM subnet, VM public IP `51.136.6.54`, Azure trusted services, Marc's workstation IP
+- RBAC: Marc = `Secrets Officer`, VM managed identity (`vm-egs-automation`) = `Secrets User` (read-only)
+- Diagnostics → `kv-audit-logs` → Log Analytics `log-egs-audit`
+- Full inventory: `docs/secrets-inventory.md` in `egs-automation` repo
+
+### Print-specific secrets
+- `EGS-PRINT-SERVICE-KEY` — local print service API key
+- `EGS-PRINT-PC-SSH-PASSWORD` — Print PC SSH (192.168.1.39)
+- `PRINTNODE-API-KEY` — cloud printing service
+
+### Secret naming
+**`UPPERCASE-WITH-HYPHENS`**, pattern `<SERVICE>-<QUALIFIER>`. Tagged with `service`, `server`, `owner`, `access`, `purpose`, `expires`.
+
+Query: `az keyvault secret list --vault-name kv-egs-automation --query "[?tags.service=='egs-print-service']"`
+
+### Cross-project defaults
+| Thing | Default |
+|---|---|
+| Company | EGS Enggist & Grandjean Software SA (Switzerland) |
+| Timezone | Europe/Zurich (CET/CEST) |
+| Primary domain | `eg-software.com` |
+| Languages | DE / FR / EN |
+| VPN | Tailscale (`100.64.0.0/10`) |
+| SSH | key-only, no root, port 2222 on hardened boxes |
+| SMTP alerts | `alerts@calctag.com` via Infomaniak msmtp |
+| Git | GitHub private repos, SSH deploy keys per server |
+
+### Inherited rules
+- **Check Azure Key Vault first** before asking for any secret
+- Never echo/commit secrets; verify vault writes with read-back
+- Never claim success without verification evidence
+- Swiss German formal tone for customer emails; English OK for internal
+
+---
+
 ## Project Status: ACTIVE — Extracted from fairmont-calcmenu-labels
 
 ## What This Is
@@ -203,3 +242,13 @@ Potential scale protocols to support:
 - HID (generic USB scales)
 - Serial/RS-232 scales
 - Specific brands: CAS, Ohaus, Adam Equipment
+
+## Security Defaults
+These rules apply to every code change. Adapt to the project stack.
+
+**Auth:** Every endpoint needs an explicit auth decision. Validate identity owns the resource.
+**Input:** Validate type, range, length, allowlist enums. Reject with 400. Add body size limits.
+**Database:** Parameterised queries only. Allowlist enum params before use in WHERE clauses.
+**Secrets:** Required env vars fail-fast at startup. All vars documented in .env.example. Never log secrets.
+**HTTP:** No wildcard CORS on authenticated endpoints. Set X-Content-Type-Options, X-Frame-Options, HSTS.
+**Jobs:** Every background job needs an execution timeout.
